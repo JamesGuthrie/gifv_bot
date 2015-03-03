@@ -1,0 +1,6 @@
+user_agent: "example"
+user:       "example"
+password:   "passwd"
+subreddits:
+    - subreddit1
+    - subreddit2
