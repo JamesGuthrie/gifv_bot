@@ -19,29 +19,33 @@ def consumer(debug):
     clogger = logging.getLogger(name+'.consumer')
     clogger.setLevel(logging.DEBUG)
     clogger.info("Starting up consumer thread")
-    #TODO: handle redis ConnectionError
-    rdb = redis.StrictRedis(host='localhost', port=6379, db=0)
-    while True:
-        submission = q.get()
-        if rdb.get(submission.id):
-            clogger.debug("Skipping submission %s: already processed", submission.id)
-            continue
-        clogger.debug(transform(submission.url))
-        if debug:
-            clogger.debug("Adding comment here")
-            continue
-        try:
-            comment = submission.add_comment(transform(submission.url))
-        except praw.errors.RateLimitExceeded as err:
-            clogger.debug("Rate limited, comment on %s failed: %s", submission.id, err)
-            q.task_done()
-        else:
-            if comment:
-                rdb.set(submission.id, comment.id);
-                clogger.debug("New comment %s posted on thread %s", comment.id, submission.id)
+    try:
+        rdb = redis.StrictRedis(host='localhost', port=6379, db=0)
+        rdb.ping()
+    except redis.exceptions.ConnectionError as err:
+        clogger.error("Unable to connect to Redis: %s", err)
+    else:
+        while True:
+            submission = q.get()
+            if rdb.get(submission.id):
+                clogger.debug("Skipping submission %s: already processed", submission.id)
+                continue
+            clogger.debug(transform(submission.url))
+            if debug:
+                clogger.debug("Adding comment here")
+                continue
+            try:
+                comment = submission.add_comment(transform(submission.url))
+            except praw.errors.RateLimitExceeded as err:
+                clogger.debug("Rate limited, comment on %s failed: %s", submission.id, err)
                 q.task_done()
             else:
-                clogger.error("Comment on post failed")
+                if comment:
+                    rdb.set(submission.id, comment.id);
+                    clogger.debug("New comment %s posted on thread %s", comment.id, submission.id)
+                else:
+                    clogger.error("Comment on post failed")
+                q.task_done()
 
 class Producer(object):
 
