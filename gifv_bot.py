@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import datetime
 import http.client
 import logging
 import praw
@@ -94,15 +95,16 @@ class Producer(object):
             submissions = self.reddit.get_subreddit(self.subreddit).get_new(limit=100)
             for x in submissions:
                 # filter submissions by gif y/n
+                # TODO: with various match options
                 if not re.search('imgur\.com.*\.gif$', x.url):
                     continue
-                # TODO: with various match options
-                # filter submissions by popularity
-                if not self.popular(x):
-                    if not self.large(x.url):
-                        continue
-                self.logger.debug("Adding %s to queue", x.id)
-                q.put(x)
+                # if not current, discard
+                if not self.current(x):
+                    continue
+                # if popular or large, process
+                if self.popular(x) or self.large(x.url):
+                    self.logger.debug("Adding %s to queue", x.id)
+                    q.put(x)
             time.sleep(600);
 
     def large(self, url):
@@ -129,6 +131,17 @@ class Producer(object):
         if submission.score > 50:
             return True
         return False
+
+    def current(self, submission):
+        subtime = datetime.datetime.fromtimestamp(submission.created_utc, datetime.timezone.utc)
+        now = datetime.datetime.utcnow().replace(tzinfo = datetime.timezone.utc)
+        if (now - subtime) > datetime.timedelta(days=1):
+            self.logger.debug("Submission is not current")
+            return False
+        else:
+            self.logger.debug("Submission is current")
+            return True
+        return True
 
 def readconfig():
     with open('config.yaml') as f:
