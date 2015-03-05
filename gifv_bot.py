@@ -18,10 +18,11 @@ def transform(url):
 
 class Consumer(object):
 
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, delay=30):
+        self.debug = debug
+        self.delay = delay
         self.logger = logging.getLogger(name + '.consumer')
         self.logger.setLevel(logging.DEBUG)
-        self.debug = debug
 
     def start(self):
         self.thread = threading.Thread(target=self.run)
@@ -58,6 +59,7 @@ class Consumer(object):
             if comment:
                 self.rdb.set(submission.id, comment.id);
                 self.logger.info("New comment %s posted on thread %s", comment.id, submission.id)
+                time.sleep(self.delay)
             else:
                 self.logger.error("Comment on post failed")
 
@@ -77,9 +79,10 @@ class Consumer(object):
 
 class Producer(object):
 
-    def __init__(self, reddit, subreddit):
+    def __init__(self, reddit, subreddit, length=5000000):
         self.reddit = reddit
         self.subreddit = subreddit
+        self.length = length
         self.logger = logging.getLogger(name + '.producer.' + self.subreddit)
         self.logger.setLevel(logging.DEBUG)
 
@@ -119,8 +122,10 @@ class Producer(object):
                 self.logger.debug("Following redirect")
                 url = response.getheader("Location")
                 return self.large(url)
+            #TODO: maybe throw exception here?
+            return False
         length = response.getheader("Content-Length")
-        if int(length) >= 5000000:
+        if int(length) >= self.length:
             self.logger.debug("Resource is large")
             return True
         return False
@@ -163,12 +168,14 @@ reddit.login(cfg['user'], cfg['password'])
 
 # prepare and start producer
 for subreddit in cfg['subreddits']:
-    prod = Producer(reddit, subreddit)
+    prod = Producer(reddit, subreddit, cfg['large_length'])
     prod.start()
 
 # prepare and start consumer
-cons = Consumer(debug=True)
+cons = Consumer(debug=cfg['debug'], delay=cfg['comment_delay'])
 cons.start()
 
 cons.join()
+
+#TODO: GC redis
 
