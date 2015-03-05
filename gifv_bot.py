@@ -15,37 +15,58 @@ name = "gifv_bot"
 def transform(url):
     return url+"v"
 
-def consumer(debug):
-    clogger = logging.getLogger(name+'.consumer')
-    clogger.setLevel(logging.DEBUG)
-    clogger.info("Starting up consumer thread")
-    try:
-        rdb = redis.StrictRedis(host='localhost', port=6379, db=0)
-        rdb.ping()
-    except redis.exceptions.ConnectionError as err:
-        clogger.error("Unable to connect to Redis: %s", err)
-    else:
+class Consumer(object):
+
+    def __init__(self, debug=False):
+        self.logger = logging.getLogger(name + '.consumer')
+        self.logger.setLevel(logging.DEBUG)
+        self.debug = debug
+
+    def start(self):
+        self.thread = threading.Thread(target=self.run)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def join(self):
+        self.thread.join()
+
+    def connect_redis(self):
+        try:
+            self.rdb = redis.StrictRedis(host='localhost', port=6379, db=0)
+            self.rdb.ping()
+        except redis.exceptions.ConnectionError as err:
+            self.logger.error("Unable to connect to Redis: %s", err)
+            return False
+        return True
+
+    def post_comment(self, submission):
+        if self.debug:
+            self.logger.debug("Adding comment here")
+            return
+        try:
+            comment = submission.add_comment(transform(submission.url))
+        except praw.errors.RateLimitExceeded as err:
+            self.logger.debug("Rate limited, comment on %s failed: %s", submission.id, err)
+        else:
+            if comment:
+                self.rdb.set(submission.id, comment.id);
+                self.logger.info("New comment %s posted on thread %s", comment.id, submission.id)
+            else:
+                self.logger.error("Comment on post failed")
+
+    def run(self):
+        self.logger = logging.getLogger(name+'.consumer')
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.info("Starting up consumer thread")
+        if not self.connect_redis():
+            return
         while True:
             submission = q.get()
-            if rdb.get(submission.id):
-                clogger.debug("Skipping submission %s: already processed", submission.id)
+            if self.rdb.get(submission.id):
+                self.logger.debug("Skipping submission %s: already processed", submission.id)
                 continue
-            clogger.debug(transform(submission.url))
-            if debug:
-                clogger.debug("Adding comment here")
-                continue
-            try:
-                comment = submission.add_comment(transform(submission.url))
-            except praw.errors.RateLimitExceeded as err:
-                clogger.debug("Rate limited, comment on %s failed: %s", submission.id, err)
-                q.task_done()
-            else:
-                if comment:
-                    rdb.set(submission.id, comment.id);
-                    clogger.debug("New comment %s posted on thread %s", comment.id, submission.id)
-                else:
-                    clogger.error("Comment on post failed")
-                q.task_done()
+            self.post_comment(submission)
+            q.task_done()
 
 class Producer(object):
 
@@ -127,8 +148,7 @@ for subreddit in cfg['subreddits']:
     prod.start()
 
 # prepare and start consumer
-cons = threading.Thread(target=consumer, args=[cfg['debug']])
-cons.daemon = True
+cons = Consumer(debug=True)
 cons.start()
 
 cons.join()
