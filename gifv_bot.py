@@ -47,6 +47,12 @@ class Consumer(object):
             comment = submission.add_comment(transform(submission.url))
         except praw.errors.RateLimitExceeded as err:
             self.logger.debug("Rate limited, comment on %s failed: %s", submission.id, err)
+        except praw.errors.APIException as err:
+            if err.error_type == 'TOO_OLD':
+                self.rdb.set(submission.id, "None");
+                self.logger.debug("Cannot post on thread %s, too old", submission.id)
+            else:
+                raise praw.errors.APIException(err)
         else:
             if comment:
                 self.rdb.set(submission.id, comment.id);
